@@ -122,6 +122,9 @@ REM @XCOPY "$(ProjectDir)uSyncSettings.config" "E:\Files\Dev\Umbraco\versions\6.
 @ECHO to 7.0.0
 @XCOPY "$(TargetPath)" "E:\Files\Dev\Umbraco\versions\7.0.0\bin\" /y /i /q
 @XCOPY "$(ProjectDir)uSyncSettings.config" "E:\Files\Dev\Umbraco\versions\7.0.0\config\" /y /i /q
+@ECHO to 7.0.0b
+@XCOPY "$(TargetPath)" "E:\Files\Dev\Umbraco\versions\7.0.0b\bin\" /y /i /q
+@XCOPY "$(ProjectDir)uSyncSettings.config" "E:\Files\Dev\Umbraco\versions\7.0.0b\config\" /y /i /q
 
 @ECHO to Release Folder
 @XCOPY "$(TargetPath)" "E:\Dropbox\uSync\Releases\latest\uSync_Umbraco4\7ddf1350-8c1a-4181-b902-576decb637e0" /y /i /q

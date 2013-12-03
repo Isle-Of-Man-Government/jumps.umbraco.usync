@@ -141,9 +141,75 @@ namespace jumps.umbraco.usync
                     {
                         LogHelper.Info<SyncDataTypesV7>("Importing Node {0}", ()=> node.Name.LocalName);
                         // import
-                        _packService.ImportDataTypeDefinitions(node); 
+                        _packService.ImportDataTypeDefinitions(node);
+                        UpdatePreValues(node);
+
+                        
                     }
                 }
+            }
+        }
+
+        private static void UpdatePreValues(XElement element)
+        {
+            // "logic"
+
+            var dataTypeElement = element.Element("DataType");
+            var dataTypeDefinitionId = new Guid(dataTypeElement.Attribute("Definition").Value);
+
+            var item = _dtService.GetDataTypeDefinitionById(dataTypeDefinitionId);
+            if (item == null)
+                return;
+            LogHelper.Info<SyncDataTypesV7>("UpdatePreValues for {0} [{1}]", () => item.Name, () => item.Id);
+
+            if (dataTypeElement.Element("PreValues") != null)
+            {
+                // get current values
+                IDictionary<string, PreValue> currentValues = _dtService.GetPreValuesCollectionByDataTypeId(item.Id).FormatAsDictionary();
+                
+                foreach (KeyValuePair<string, PreValue> current in currentValues)
+                {
+                    if ( !string.IsNullOrEmpty(current.Key))
+                    {
+                        LogHelper.Info<SyncDataTypesV7>("## {0}", () => current.Key);
+                        
+                        if (current.Value != null && !string.IsNullOrEmpty(current.Value.Value))
+                        {
+                            LogHelper.Info<SyncDataTypesV7>("### {0}", () => current.Value.Value);
+                        }
+                         
+                    }
+                }
+                
+                // go through the values in the xml
+                foreach (XElement preValueXml in dataTypeElement.Element("PreValues").Elements("PreValue"))
+                {
+                    var alias = preValueXml.Attribute("Alias");
+                    if ( alias != null ) 
+                    {
+                        LogHelper.Info<SyncDataTypesV7>("Pre-Value {0}", () => alias.Value);
+                        if (!currentValues.ContainsKey(alias.Value))
+                        {
+                            LogHelper.Info<SyncDataTypesV7>("Adding Pre-Value {0} {1}", () => alias.Value, () => preValueXml.Attribute("Value").Value);
+
+                            //currentValues.Add(alias.Value, new PreValue(preValueXml.Attribute("Value").Value)) ;
+                        }
+                        else
+                        {
+                            LogHelper.Info<SyncDataTypesV7>("value already exists (we update?)");
+                            // currentValues[alias.Value] = new PreValue( currentValues[alias.Value].Id, preValueXml.Attribute("Value").Value) ; 
+                        }
+                    }
+                }
+
+                LogHelper.Info<SyncDataTypesV7>("Saving Datatype and preValues {0}", () => currentValues.Count());
+                _dtService.SavePreValues(item.Id, currentValues);
+                // delete any values that are in the collection but not the xml
+
+                // save it all back to the datatype
+
+                 
+
             }
         }
     }
