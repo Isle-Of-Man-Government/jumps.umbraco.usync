@@ -2,19 +2,14 @@
 using System.Collections; 
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
 using System.Xml;
 using umbraco.cms.businesslogic;
-using umbraco.cms.businesslogic.datatype ;
-
-using umbraco.BusinessLogic ; 
-
+using umbraco.cms.businesslogic.datatype;
+using umbraco.BusinessLogic; 
 using System.IO;
+using Umbraco.Core;
 using Umbraco.Core.IO;
 using umbraco;
-
 using Umbraco.Core.Logging;
 
 //  Check list
@@ -24,6 +19,9 @@ using Umbraco.Core.Logging;
 //  OnSave          (Works in 4.11.5)
 //  OnDelete        X
 //  ReadFromDisk    X
+using Umbraco.Core.Models;
+using Umbraco.Core.Services;
+using DataTypeDefinition = umbraco.cms.businesslogic.datatype.DataTypeDefinition;
 
 namespace jumps.umbraco.usync
 {
@@ -102,8 +100,13 @@ namespace jumps.umbraco.usync
                         if (d != null)
                         {
                             d.Save();
+                            string dbttype = node.Attributes["dbtype"].Value;
+                            var Service = GetService();
+                            var DataTypeDef = Service.GetDataTypeDefinitionById(d.UniqueId);
+                            DataTypeDatabaseType DbStatus = (DataTypeDatabaseType)Enum.Parse(typeof(DataTypeDatabaseType), dbttype);
+                            DataTypeDef.DatabaseType = DbStatus;
+                            Service.Save(DataTypeDef);
                         }
-
                         else
                         {
                             LogHelper.Debug<SyncDataType>("NULL NODE FOR {0}", ()=> file);
@@ -143,21 +146,19 @@ namespace jumps.umbraco.usync
                     isNew = true; 
 
                     if (u == null)
-                        u = global::umbraco.BusinessLogic.User.GetUser(0);
+                        u = User.GetUser(0);
 
-                    global::umbraco.cms.businesslogic.datatype.controls.Factory f = new global::umbraco.cms.businesslogic.datatype.controls.Factory();
 
                     dtd = DataTypeDefinition.MakeNew(u, _name, new Guid(_def));
-                    var dataType = f.DataType(new Guid(_id));
-                    if (dataType == null)
-                        throw new NullReferenceException("Could not resolve a data type with id " + _id);
-
-
-
-                    dtd.DataType = dataType;
-                    dtd.Save();
                 }
 
+                global::umbraco.cms.businesslogic.datatype.controls.Factory f = new global::umbraco.cms.businesslogic.datatype.controls.Factory();
+                var dataType = f.DataType(new Guid(_id));
+                if (dataType == null)
+                    throw new NullReferenceException("Could not resolve a data type with id " + _id);
+
+                dtd.DataType = dataType;
+                dtd.Save();
 
 
                 if (!isNew && uSyncSettings.MatchedPreValueDataTypes.Contains(_id))
@@ -167,67 +168,70 @@ namespace jumps.umbraco.usync
                 }
                 else
                 {
-                    //
-                    // PREVALUES - HELL :: num 4532
-                    // 
-                    // Here we are attempting to add new prevalues to a DataType, and remove old ones.
-                    // between umbraco installs the IDs will change. we are not trying to match them,
-                    // we are just trying to match, based on value - problem being, if you change 
-                    // a value's value then this code would think it's a new ID, delete the old one
-                    // and create a new one - as we are syncing from a dev point of view we are
-                    // going to do this for now...
-                    //
-
-                    System.Collections.SortedList prevals = PreValues.GetPreValues(dtd.Id);
-                    Hashtable oldvals = new Hashtable();
-                    foreach (DictionaryEntry v in prevals)
-                    {
-                        if ((PreValue)v.Value != null)
-                        // if (!String.IsNullOrEmpty(((PreValue)v.Value).Value.ToString()))
-                        {
-                            oldvals.Add(((PreValue)v.Value).Id, ((PreValue)v.Value).Value.ToString());
-                        }
-                    }
-
-                    Hashtable newvals = new Hashtable();
-                    foreach (XmlNode xmlPv in xmlData.SelectNodes("PreValues/PreValue"))
-                    {
-                        XmlAttribute val = xmlPv.Attributes["Value"];
-
-                        if (val != null)
-                        {
-                            // add new values only - because if we mess with old ones. it all goes pete tong..
-                            if ((val.Value != null) && (!oldvals.ContainsValue(val.Value)))
-                            {
-                                LogHelper.Debug<SyncDataType>("Adding Prevalue [{0}]", ()=> val.Value);
-                                PreValue p = new PreValue(0, 0, val.Value);
-                                p.DataTypeId = dtd.Id;
-                                p.Save();
-                            }
-
-                            newvals.Add(xmlPv.Attributes["Id"], val.Value);
-                        }
-                    }
-
-
-                    // ok now delete any values that have gone missing between syncs..
-
-                    if (!uSyncSettings.Preserve || !uSyncSettings.PreservedPreValueDataTypes.Contains(_id))
-                    {
-                        foreach (DictionaryEntry oldval in oldvals)
-                        {
-                            if (!newvals.ContainsValue(oldval.Value))
-                            {
-                                PreValue o = new PreValue((int)oldval.Key);
-                                LogHelper.Debug<SyncDataType>("In {0} Deleting prevalue [{1}]", ()=> dtd.Text, ()=> oldval.Value);
-                                o.Delete();
-                            }
-                        }
-                    }
-                    return dtd;
+                    return AddPreValuesToDatatype(xmlData, dtd, _id);
                 }
             }
             return null;
+        }
+
+        private static DataTypeDefinition AddPreValuesToDatatype(XmlNode xmlData, DataTypeDefinition dtd, string _id)
+        {
+//
+            // PREVALUES - HELL :: num 4532
+            // 
+            // Here we are attempting to add new prevalues to a DataType, and remove old ones.
+            // between umbraco installs the IDs will change. we are not trying to match them,
+            // we are just trying to match, based on value - problem being, if you change 
+            // a value's value then this code would think it's a new ID, delete the old one
+            // and create a new one - as we are syncing from a dev point of view we are
+            // going to do this for now...
+            //
+
+            SortedList prevals = PreValues.GetPreValues(dtd.Id);
+            Hashtable oldvals = new Hashtable();
+            foreach (DictionaryEntry v in prevals)
+            {
+                if (v.Value != null)
+                {
+                    oldvals.Add(((PreValue)v.Value).Id, ((PreValue)v.Value).Value);
+                }
+            }
+
+            Hashtable newvals = new Hashtable();
+            foreach (XmlNode xmlPv in xmlData.SelectNodes("PreValues/PreValue"))
+            {
+                XmlAttribute val = xmlPv.Attributes["Value"];
+
+                if (val != null)
+                {
+                    // add new values only - because if we mess with old ones. it all goes pete tong..
+                    if ((val.Value != null) && (!oldvals.ContainsValue(val.Value)))
+                    {
+                        LogHelper.Debug<SyncDataType>("Adding Prevalue [{0}]", () => val.Value);
+                        PreValue p = new PreValue(0, 0, val.Value);
+                        p.DataTypeId = dtd.Id;
+                        p.Save();
+                    }
+
+                    newvals.Add(xmlPv.Attributes["Id"], val.Value);
+                }
+            }
+
+            // ok now delete any values that have gone missing between syncs..
+
+            if (!uSyncSettings.Preserve || !uSyncSettings.PreservedPreValueDataTypes.Contains(_id))
+            {
+                foreach (DictionaryEntry oldval in oldvals)
+                {
+                    if (!newvals.ContainsValue(oldval.Value))
+                    {
+                        PreValue o = new PreValue((int)oldval.Key);
+                        LogHelper.Debug<SyncDataType>("In {0} Deleting prevalue [{1}]", () => dtd.Text, () => oldval.Value);
+                        o.Delete();
+                    }
+                }
+            }
+            return dtd;
         }
 
         /// <summary>
@@ -278,12 +282,15 @@ namespace jumps.umbraco.usync
         /// <returns>the xmlelement representation of the type</returns>
         public static XmlElement DataTypeToXml(DataTypeDefinition dataType, XmlDocument xd)
         {
+            var DbType = GetDbType(dataType);
+
             LogHelper.Debug<SyncDataType>("DataType To XML"); 
 
             XmlElement dt = xd.CreateElement("DataType");
             dt.Attributes.Append(xmlHelper.addAttribute(xd, "Name", dataType.Text));
             dt.Attributes.Append(xmlHelper.addAttribute(xd, "Id", dataType.DataType.Id.ToString()));
             dt.Attributes.Append(xmlHelper.addAttribute(xd, "Definition", dataType.UniqueId.ToString()));
+            dt.Attributes.Append(xmlHelper.addAttribute(xd, "dbtype", DbType));
 
             // templates
             XmlElement prevalues = xd.CreateElement("PreValues");
@@ -300,6 +307,14 @@ namespace jumps.umbraco.usync
             dt.AppendChild(prevalues);
 
             return dt;
+        }
+
+        private static string GetDbType(DataTypeDefinition dataType)
+        {
+            var Service = GetService();
+            var DbType = Service.GetDataTypeDefinitionById(dataType.UniqueId);
+
+            return DbType != null ? DbType.DatabaseType.ToString() : string.Empty;
         }
 
         private static List<PreValue> GetPreValues(DataTypeDefinition dataType)
@@ -349,10 +364,11 @@ namespace jumps.umbraco.usync
             {
                 helpers.XmlDoc.ArchiveFile(sender.GetType().ToString(), ((DataTypeDefinition)sender).Text);
             }
-
-            // no cancel... 
-           
         }
         
+        public static IDataTypeService GetService()
+        {
+            return ApplicationContext.Current.Services.DataTypeService;
+        }
     }
 }
